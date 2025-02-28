@@ -14,103 +14,107 @@ Terraform, AWS, Docker, Linux, Git
 ### Details of project
 
 - Creating VPC and Subnets
-Initially, the VPC and subnets were created using the template file provided in the project description. The only parameters used were:
-- `cidr_block`, set as a variable
-- A tag indicating the environment where these resources are being deployed
 
-To connect Terraform to the AWS account, the `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` variables, created in the AWS module, were exported in the terminal. Then, running:
+  Initially, the VPC and subnets were created using the template file provided in the project description. The only parameters used were:
+  - `cidr_block`, set as a variable
+  - A tag indicating the environment where these resources are being deployed
 
-```sh
-terraform init
-```
+  To connect Terraform to the AWS account, the `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` variables, created in the AWS module, were exported in the terminal. Then, running:
 
-This command downloaded the provider files locally. After that, the resources were created by running the command:
+  ```sh
+  terraform init
+  ```
 
-```sh
-terraform apply
-```
+  This command downloaded the provider files locally. After that, the resources were created by running the command:
 
-It displays the components Terraform will create by default.
+  ```sh
+  terraform apply
+  ```
 
-After applying Terraform, the AWS console shows the following resources created automatically:
-- **Route Table:** Acts as a virtual router for the VPC
-- **Network ACL:** Functions as a firewall for the subnets
+  It displays the components Terraform will create by default.
 
-At this stage, communication is only enabled within the VPC. To allow internet access, the route table needs a connection to an **Internet Gateway**.
+  After applying Terraform, the AWS console shows the following resources created automatically:
+  - **Route Table:** Acts as a virtual router for the VPC
+  - **Network ACL:** Functions as a firewall for the subnets
+
+  At this stage, communication is only enabled within the VPC. To allow internet access, the route table needs a connection to an **Internet Gateway**.
 
 - Creating an Internet Gateway and Route Table
-A new route table was created with rules for internet connectivity. The internal connection rule to the VPC is automatically created, so only the internet gateway entry was defined.
 
-The route was set with:
-- `cidr_block = 0.0.0.0/0` to allow access from all IPs
-- The ID of the internet gateway, which is also created via Terraform
+  A new route table was created with rules for internet connectivity. The internal connection rule to the VPC is automatically created, so only the internet gateway entry was defined.
 
-The internet gateway requires only the VPC ID to be created.
+  The route was set with:
+    - `cidr_block = 0.0.0.0/0` to allow access from all IPs
+    - The ID of the internet gateway, which is also created via Terraform
+
+  The internet gateway requires only the VPC ID to be created.
 
 - Associating Subnets with Route Table
-Once these resources are created, subnets need to be associated with the route table that has the internet gateway. This is done using `aws_route_table_association`:
 
-```hcl
-resource "aws_route_table_association" "a-rtb-subnet" {
-  subnet_id      = aws_subnet.myapp-subnet-1.id
-  route_table_id = aws_route_table.myapp-route-table.id
-}
-```
+  Once these resources are created, subnets need to be associated with the route table that has the internet gateway. This is done using `aws_route_table_association`:
 
-Alternatively, the default route table can be used for connections:
-
-```hcl
-resource "aws_default_route_table" "main-rtb" {
-  default_route_table_id = aws_vpc.myapp-vpc.default_route_table_id
-
-  route {
-    cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.myappp-igw.id
+  ```hcl
+  resource "aws_route_table_association" "a-rtb-subnet" {
+    subnet_id      = aws_subnet.myapp-subnet-1.id
+    route_table_id = aws_route_table.myapp-route-table.id
   }
+  ```
 
-  tags = {
-    Name = "${var.env_prefix}-main-rtb"
+  Alternatively, the default route table can be used for connections:
+
+  ```hcl
+  resource "aws_default_route_table" "main-rtb" {
+    default_route_table_id = aws_vpc.myapp-vpc.default_route_table_id
+
+    route {
+      cidr_block = "0.0.0.0/0"
+      gateway_id = aws_internet_gateway.myappp-igw.id
+    }
+
+    tags = {
+      Name = "${var.env_prefix}-main-rtb"
+    }
   }
-}
-```
+  ```
 
-- Security Groups
-Security groups were configured to allow traffic on ports 22 (SSH) and 8080 (Nginx). Two approaches were considered:
-1. Creating a new security group
-2. Using the default VPC security group
+- Security Group
 
-Both options require association with the VPC ID. The following ingress and egress rules were defined:
+  Security groups were configured to allow traffic on ports 22 (SSH) and 8080 (Nginx). Two approaches were considered:
+  1. Creating a new security group
+  2. Using the default VPC security group
 
-```hcl
-resource "aws_default_security_group" "default-sg" {
-  vpc_id = aws_vpc.myapp-vpc.id
+  Both options require association with the VPC ID. The following ingress and egress rules were defined:
 
-  ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "TCP"
-    cidr_blocks = [var.my_ip] # My own IP address
+  ```hcl
+  resource "aws_default_security_group" "default-sg" {
+    vpc_id = aws_vpc.myapp-vpc.id
+
+    ingress {
+      from_port   = 22
+      to_port     = 22
+      protocol    = "TCP"
+      cidr_blocks = [var.my_ip] # My own IP address
+    }
+
+    ingress {
+      from_port   = 8080
+      to_port     = 8080
+      protocol    = "TCP"
+      cidr_blocks = ["0.0.0.0/0"] # Open access to the app
+    }
+
+    egress {
+      from_port   = 0
+      to_port     = 0
+      protocol    = "-1" # Any protocol is accepted
+      cidr_blocks = ["0.0.0.0/0"]
+    }
+
+    tags = {
+      Name = "${var.env_prefix}-default-sg"
+    }
   }
-
-  ingress {
-    from_port   = 8080
-    to_port     = 8080
-    protocol    = "TCP"
-    cidr_blocks = ["0.0.0.0/0"] # Open access to the app
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1" # Any protocol is accepted
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = {
-    Name = "${var.env_prefix}-default-sg"
-  }
-}
-```
+  ```
 
 - EC2 Image and Instance
 
@@ -158,7 +162,8 @@ resource "aws_default_security_group" "default-sg" {
 
   A new SSH key was created and moved to the `.ssh` folder with proper permissions.
 
-  ## Automating Key Pair Creation
+- Automating Key Pair Creation
+
   Instead of manually generating and downloading a new key from AWS, an existing key can be used within Terraform:
 
   ```hcl
@@ -180,7 +185,8 @@ resource "aws_default_security_group" "default-sg" {
 
   ![Diagram](./images/tf-project1-1.png)
 
-  - Running an Entrypoint Script to Start a Docker Container
+- Running an Entrypoint Script to Start a Docker Container
+
   Now that the instance is running, it needs to be configured to install Docker and run an application. This is achieved using the `user_data` attribute in EC2, which acts as an entrypoint script:
 
   ```hcl
@@ -199,7 +205,8 @@ resource "aws_default_security_group" "default-sg" {
 
   Once the configuration is complete, the Nginx server can be accessed via the public IP on port 8080.
 
-  ## Extracting Shell Script
+- Extracting Shell Script
+
   For larger scripts, an external file can be referenced using `file()`, similar to the SSH key setup.
 
   To check all resources created by Terraform in this project, run:
@@ -207,7 +214,6 @@ resource "aws_default_security_group" "default-sg" {
   ```sh
   terraform state list
   ```
-
   ![Diagram](./images/tf-project1-2.png)
 
 
