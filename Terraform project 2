@@ -1,0 +1,72 @@
+Criação de modulos
+
+- Clean up main.tf
+
+Uma boa prática para criar projetos em terraform é separar os arquivos em main.tf, vairables.tf, output.tf e providers.tf. O main vai ter apenas os recursos, então foram removidos os outputs e as declarações de variáveis desse arquivo.
+
+- Create a Module
+
+Foram criadas duas pastas que servirão como módulos nesse projeto, um deles chamado subnet e o outro webserver. Cada módulo vai conter seus próprios arquivos padrão.
+
+A criação for módulos faz sentido para agrupar multiplos recursos em unidades lógicas. Não faz muito sentido criar módulos para 1 ou 2 recursos.
+
+Dentro do módulo de subnet, foram colocados 3 recursos: aws_subnet, aws_internet_gateway e aws_default_route_table, com todos os parâmetros definidos com variáveis que serão passadas pelo main principal. As variáveis devem ser importadas para dentro da pasta do módulo para funcionarem. 
+
+- Use the module
+
+Para chamar o módulo dentro do main.tf raiz do projeto, usa-se a seguinte estrutura:
+
+module "myapp-subnet" {
+  source = "./modules/subnet" # Location of the module
+  subnet_cidr_block = var.subnet_cidr_block
+  avail_zone = var.avail_zone
+  env_prefix = var.env_prefix
+  vpc_id = aws_vpc.myapp-vpc.id
+  default_route_table_id = aws_vpc.myapp-vpc.default_route_table_id
+}
+
+Desse modo, o source vai referenciar onde está o módulo, e as variaveis serão passadas aos child modules como argumento, e essas variáveis estão configuradas no terraform.tfvars.
+
+- Module Output
+
+Agora que os recursos da subnet estão dentro de um módulo, é necessário encontrar um jeito de acessar esses recursos para referencias os valores, por exemplo, na criação da instância, ele precisa do subnet id. Isso foi resolvido fazendo um output do objeto da subnet, para ser usada para outros módulos.
+
+output "subnet" {
+    value = aws_subnet.myapp-subnet-1
+}
+
+No recurso aws_instance
+  subnet_id = module.myapp-subnet.subnet.id
+  
+- Apply the changes
+
+Para os módulos funcionarem, é necessário rodar o terraform init, para que eles sejam reconhecidos pela ferramenta. 
+
+- Figura 1
+
+Nota-se que apenas o módulo subnet foi reconhecido, pois o módulo webserver não foi configurado no main.tf. Após criar os recursos, é possivel ver no terminal o apply complete.
+
+- Figura 2
+
+- Create Webserver module
+
+Dentro do modulo de webserver, serão adicionados os seguintes recursos: aws_instance, aws_key_pair, aws_ami e aws_default_security_group. Eles foram reconfigurados para usar as devidas variáveis e esse módulo foi chamado no main.tf
+
+module "myapp-server" {
+  source = "./modules/webserver" # Location of the module
+  vpc_id = aws_vpc.myapp-vpc.id
+  my_ip = var.my_ip
+  env_prefix = var.env_prefix
+  image_name = var.image_name
+  public_key_location = var.public_key_location
+  instance_type = var.instance_type
+  subnet_id = module.myapp-subnet.subnet.id
+  avail_zone = var.avail_zone
+}
+
+Uma observação que foi encontrada no teraform apply é que a key pair já existia na aws, então ela precisou ser removida. Ao rodar terraform apply novamente, os recursos foram criados com sucesso
+
+- Figura 3
+  
+
+

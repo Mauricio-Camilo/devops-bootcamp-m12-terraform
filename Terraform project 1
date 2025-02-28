@@ -1,0 +1,158 @@
+Criação de VPC e subnets
+
+Inicialmente foram criados os recursos de vpc e subnets usando o arquivo de template fornecido na descrição do projeto. Eles contém como parâmetros apenas o cidr_block setado como variável e uma tag que contém o ambiente ao qual esses recursos estão sendo criados. Para que o terraform se conecte a conta da AWS, as variáveis AWS_ACCESS_KEY_ID e AWS_SECRET_ACCESS_KEY criadas no módulo de AWS foram exportadas no terminal, e rodando o comando terraform init os arquivos do provider foram baixados localmente.
+
+Ao aplicar terraform apply, é possível ver quais componentes o terraform cria por padrão. 
+
+Figuras
+
+Navegando pelo console da AWS, observa-se foram criados automaticamente:
+- Route table: Serve que como um virtual router para a vpc
+- Network ACL: Atual como um configurações de firewall para as subnets
+
+Por enquanto foram apenas estabelidos componentes para realizar comunicações que ocorrem dentro da VPC, porém ela ainda não tem conexão com a internet. Para que isso seja feito, o route table deve ter uma conexão com um internet gateway.
+
+Portanto, foi criado um novo route table no terraform com as regras necessárias para estabeler a conexão com a internet. Para configuração desse recurso, a regra de conexão interna com a vpc é criada automaticamente, então apenas a entrada para o internet gateway foi criada. O route foi configurado com o cidr_block 0.0.0.0/0, para aceitar todos os ips da internet, e o id do gateway, que também será criado no terraform. O gateway só necessita do id da vpc para ser criado. 
+
+Após criar esses recursos, falta apenas associar as subnets ao route table criado com o gateway. Isso é feito usando o recurso aws_route_table_association. 
+
+resource "aws_route_table_association" "a-rtb-subnet" {
+  subnet_id = aws_subnet.myapp-subnet-1.id
+  route_table_id = aws_route_table.myapp-route-table.id
+}
+
+Também é possível usar o route table default para fazer as conexões, usando o recurso aws_default_route_table;
+
+resource "aws_default_route_table" "main-rtb" {
+  default_route_table_id = aws_vpc.myapp-vpc.default_route_table_id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.myappp-igw.id
+  }
+
+  tags = {
+    Name = "${var.env_prefix}-main-rtb"
+  }
+}
+
+Security groups
+
+Foram configuradas também no terraform as security groups para abrir as portas 22 (SSH) e 8080 do nginx. Duas abordagens podem ser usadas aqui, que são a criação de uma nova sg, ou usar o sg default que vem da vpc. Em ambos os casos, o sg deve ser associado ao vpc id, e foram criadas regras de entrada e saída:
+
+resource "aws_default_security_group" "default-sg" {
+  vpc_id = aws_vpc.myapp-vpc.id
+
+  ingress {
+    from_port = 22
+    to_port = 22
+    protocol = "TCP"
+    cidr_blocks = [var.my_ip] # My own IP address
+  }
+
+  ingress {
+    from_port = 8080
+    to_port = 8080
+    protocol = "TCP"
+    cidr_blocks = ["0.0.0.0/0"] # Anyone can access the app
+  }
+
+  egress {
+    from_port = 0
+    to_port = 0 # Any port is allowed to leave
+    protocol = "-1" # Any protocol is accepted
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "${var.env_prefix}-default-sg"
+  }
+}
+
+Amazon EC2 Image / Instance
+
+Os recursos criados para provisionar a imagem EC2 seguem abaixo:
+
+data "aws_ami" "latest-amazon-linux-image" {
+  most_recent = true
+  owners = ["amazon"]
+  filter {
+    name = "name"
+    values = ["amzn2-ami-kernel-*-x86_64-gp2"] # Image name for any version
+  }
+  filter {
+    name = "virtualization-type"
+    values = ["hvm"] 
+  }
+}
+
+output "aws_ami_id" {
+  value = data.aws_ami.latest-amazon-linux-image.id
+}
+
+resource "aws_instance" "myapp-server" {
+  ami = data.aws_ami.latest-amazon-linux-image.id 
+  instance_type = var.instance_type # t2.micro
+
+  subnet_id = aws_subnet.myapp-subnet-1.id
+  vpc_security_group_ids = [aws_default_security_group.default-sg.id]
+  availability_zone = var.avail_zone
+
+  associate_public_ip_address = true # Enable to access via browser
+  key_name = "server-key-pair" # Key pair created to ssh into the instance
+
+  tags = {
+    Name = "${var.env_prefix}-server"
+  }
+}
+
+O data foi utilizado para setar a imagem dinamicamente, contendo as configurações e filtros necessários para o ajuste de imagem.
+
+Uma nova chave ssh foi criada e movida para a pasta .ssh com a permissão correta para acessar essa instância
+
+Automate Key pair creation
+
+Para não precisar fazer o processo de geração de uma nova chave e download da AWS, pode ser usada uma chave previamente criada a usada em um recurso do terraform
+
+resource "aws_key_pair" "ssh-key" {
+  key_name = "server-key"
+  public_key =  file(var.public_key_location) # Path of the id_rsa.pub public key
+}
+
+E na instância Ec2:
+
+  key_name = aws_key_pair.ssh-key.key_name # Key pair created to ssh into the instance
+
+Esse processo vai destruir a instância criada anteriormente e criar uma nova para associar a nova chave usada. Com isso, é possível conectar com a instância via ssh sem precisar referenciar a chave.
+
+- Figura 2
+
+Run entrypoint script to start Docker container
+
+A instancia agora está funcionando e pronta para uso, porém falta ainda automatizar o processo de instalar softwares, como o docker, e rodar uma aplicação. É possível fazer isso adicionando um atributo chamado user_data na instancia EC2, que funciona como um entrypoint que vai rodar comandos dentro da instância. Nesse projeto, os comandos usados são para instalar o docker, permitir rodar comandos sem o sudo, e subir uma imagem de nginx na porta 8080
+
+  user_data = <<EOF
+                  #!/bin/bash
+                  sudo yum update -y && sudo yum install -y docker
+                  sudo systemctl start docker
+                  sudo usermod -aG docker ec2-user
+                  docker run -p 8080:80 nginx
+              EOF
+  
+  user_data_replace_on_change = true            
+            
+É importante ressaltar que cada vez que os comandos são alterados, o terraform vai destruir e recriar a instância, por conta do user_data_replace_on_change, garantindo assim que o novo script será executado quando a instância for lançada.
+
+Com todas as configurações feitas, é possível abrir o navegador com o IP publico fornecido pela terraform output na porta 8080 e ver que o nginx está rodando.
+
+- Figura 3    
+
+Extract Shell Script
+
+Caso seja usado um script muito grande no lançamento de instâncias, pode ser usado um arquivo externo que contém o script e chamado usado o file, assim como foi feito com a ssh-key.
+
+Os recursos criados pelo terraform nesse projeto podem ser verificados com o comando terraform state list        
+              
+
+
+
