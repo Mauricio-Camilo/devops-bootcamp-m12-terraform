@@ -455,49 +455,6 @@ Terraform, AWS EKS, Docker, Linux, Git
 
 # Demo Project 4
 
-Configure a Shared Remote State
-
-## Technologies Used
-
-Terraform, AWS S3
-
-## Project Description
-
-- Configure Amazon S3 as remote storage for Terraform state
-
-### Details of project   
-
-- Configure Remote Storage
-
-  The remote storage is used when working with Terraform in a team, allowing the Terraform state to be shared among all members.
-
-  The initial remote storage configuration is defined in the following code:
-
-  ```hcl
-    terraform {
-      required_version = ">= 0.12"
-      backend "s3" {
-        bucket = "mauricio-myapp-tf-s3-bucket"
-        key    = "myapp/state.tfstate"
-      }
-    }
-  ```
-  The backend specifies where the state file will be stored, and in this case, an S3 bucket was chosen. It's important to note that the bucket must be created beforehand. In this example, the bucket was manually created using the AWS console.
-
-  ![Diagram](./images/tf-project4-1.png)
-
-  Once the pipeline is triggered to deploy Terraform, the state file will be automatically saved in the S3 bucket.
-
-  ![Diagram](./images/tf-project4-2.png)
-
-  Even if there is no local Terraform state file at the moment, running terraform init will connect to the backend. By using the command terraform state list, you can view the resources created in the latest state.  
-
-
-
-
-
-# Demo Project 5
-
 Complete CI/CD with Terraform
 
 ## Technologies Used
@@ -626,6 +583,45 @@ deploying to an existing server
   After making these adjustments, the pipeline successfully executed, provisioning resources in AWS and deploying the application inside the EC2 instance.
 
   ![Diagram](./images/tf-project5-1.png)
+
+# Demo Project 5
+
+Configure a Shared Remote State
+
+## Technologies Used
+
+Terraform, AWS S3
+
+## Project Description
+
+- Configure Amazon S3 as remote storage for Terraform state
+
+### Details of project   
+
+- Configure Remote Storage
+
+  The remote storage is used when working with Terraform in a team, allowing the Terraform state to be shared among all members.
+
+  The initial remote storage configuration is defined in the following code:
+
+  ```hcl
+    terraform {
+      required_version = ">= 0.12"
+      backend "s3" {
+        bucket = "mauricio-myapp-tf-s3-bucket"
+        key    = "myapp/state.tfstate"
+      }
+    }
+  ```
+  The backend specifies where the state file will be stored, and in this case, an S3 bucket was chosen. It's important to note that the bucket must be created beforehand. In this example, the bucket was manually created using the AWS console.
+
+  ![Diagram](./images/tf-project4-1.png)
+
+  Once the pipeline is triggered to deploy Terraform, the state file will be automatically saved in the S3 bucket.
+
+  ![Diagram](./images/tf-project4-2.png)
+
+  Even if there is no local Terraform state file at the moment, running terraform init will connect to the backend. By using the command terraform state list, you can view the resources created in the latest state.  
 
 
 
