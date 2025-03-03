@@ -317,6 +317,141 @@ Terraform, AWS EKS, Docker, Linux, Git
 
 ### Details of project  
 
+### VPC Creation
+
+  An existing module was used for the VPC creation as it simplifies the code and creates various necessary components that make up the network. The module's code is downloaded when the terraform init command is executed.
+
+- Basic VPC Configuration
+
+  ```hcl
+    name = "myapp-vpc"
+    cidr = var.vpc_cidr_block
+    private_subnets = var.private_subnet_cidr_blocks
+    public_subnets = var.public_subnet_cidr_blocks
+    azs = data.aws_availability_zones.azs.names
+  ```
+
+    name: The name of the VPC to facilitate identification.
+    cidr: CIDR block for the VPC, passed as a variable (var.vpc_cidr_block). It defines the range of available IPs.
+    private_subnets: List of CIDR blocks for private subnets, defined by variables.
+    public_subnets: List of CIDR blocks for public subnets.
+    azs: Uses data from AWS availability zones to distribute subnets, ensuring high availability.
+
+- NAT and DNS Configuration
+
+  ```hcl
+    enable_nat_gateway = true 
+    single_nat_gateway = true 
+    enable_dns_hostnames = true 
+  ```
+  enable_nat_gateway: Activates the creation of a NAT Gateway to allow instances in private subnets to access the internet.
+  single_nat_gateway: Configures a single NAT Gateway shared by all private subnets.
+  enable_dns_hostnames: Allows the creation of DNS hostnames for EC2 instances, making access easier.
+
+- Tags for Kubernetes Integration
+
+  ```hcl
+    tags = {
+    "kubernetes.io/cluster/muapp-eks-cluster" = "shared"
+    } 
+  ```
+  tags: Defines tags in the VPC to facilitate integration with an EKS cluster (Kubernetes managed by AWS).
+  "kubernetes.io/cluster/muapp-eks-cluster" = "shared": Informs EKS that this VPC can be used by multiple resources within the cluster.
+
+- Tags for Public Subnets
+
+  ```hcl
+    public_subnet_tags = {
+    "kubernetes.io/cluster/muapp-eks-cluster" = "shared"
+    "kubernetes.io/role/elb" = 1
+    }
+  ```
+  public_subnet_tags: Defines specific tags for public subnets.
+  "kubernetes.io/role/elb": Indicates that these subnets can host public Load Balancers (ELB) in EKS.
+
+- Tags for Private Subnets
+
+ ```hcl
+    private_subnet_tags = {
+        "kubernetes.io/cluster/muapp-eks-cluster" = "shared"
+        "kubernetes.io/role/internal-elb" = 1
+    }  
+  ```
+  private_subnet_tags: Defines tags for private subnets.
+  "kubernetes.io/role/internal-elb": Indicates that these subnets can host internal Load Balancers in EKS.
+
+  By applying the terraform plan command, it can be checked all the resources that will be created using this module.
+
+  ![Diagram](./images/tf-project3-1.png)
+
+### EKS Cluster Creation
+
+  This module configures an Amazon EKS (Elastic Kubernetes Service) cluster using the official terraform-aws-modules/eks/aws module. It simplifies EKS cluster creation and management, handling resources like node groups, networking, and security.
+
+- Basic EKS Configuration
+
+  ```hcl
+    module "eks" {
+      source = "terraform-aws-modules/eks/aws"
+      version = "19.17.2"
+
+      cluster_name = "myapp-eks-cluster"
+      cluster_version = "1.27"
+      cluster_endpoint_public_access = true  
+    }
+  ```
+
+  source and version: Specifies the module source and version to ensure compatibility and consistency.
+  cluster_name: Defines the name of the EKS cluster, making it easier to identify.
+  cluster_version: Specifies the Kubernetes version (1.27) to be used for the cluster.
+  cluster_endpoint_public_access: Enables public access to the cluster's API endpoint, allowing external access to manage the cluster.
+
+- Networking Configuration
+
+  ```hcl
+    subnet_ids = module.myapp-vpc.private_subnets
+    vpc_id = module.myapp-vpc.vpc_id
+  ```
+  subnet_ids: Specifies the private subnets created by the VPC module where the EKS cluster will deploy its resources.
+  vpc_id: Links the EKS cluster to the VPC created by the myapp-vpc module, ensuring all resources are contained within the same VPC.
+
+- Tags for Resource Identification
+
+  ```hcl
+    tags = {
+        environment = "development"
+        application = "myapp"
+    }  
+  ```
+  tags: Applies tags to all EKS resources, using environment and application name.
+
+- Managed Node Groups Configuration
+
+  ```hcl
+    eks_managed_node_groups = {
+        dev = {
+            min_size = 1
+            max_size = 3
+            desired_size = 3
+
+            instance_types = ["t2.small"]
+        }
+    }  
+  ```
+  eks_managed_node_groups: Configures a managed node group named dev for the EKS cluster.
+  min_size: Sets the minimum number of nodes to 1.
+  max_size: Sets the maximum number of nodes to 3.
+  desired_size: Specifies the desired number of nodes as 3, ensuring enough resources for workloads.
+  instance_types: Defines the instance type (t2.small) for the worker nodes, balancing cost and performance.
+
+  With this configuration, all the components of the EKS cluster are ready to be provisioned.
+
+  ![Diagram](./images/tf-project3-2.png)
+
+  It takes between 10-15 minutes to create all the resources.
+
+  ![Diagram](./images/tf-project3-3.png)
+
 
 # Demo Project 4
 
@@ -361,7 +496,11 @@ deploying to an existing server
 
 - Using the Repository and Branch
 
-  This project uses the `java-maven-app` repository, specifically the `jenkinsfile-sshagent` branch, which utilizes a shared library. The deploy stage has been modified as follows:
+  This project uses the `java-maven-app` repository, specifically the `jenkinsfile-sshagent` branch, which utilizes a shared library. 
+  
+  link of the repository: https://github.com/Mauricio-Camilo/java-maven-app/tree/jenkinsfile-sshagent
+
+  The deploy stage has been modified as follows:
 
   ```groovy
   script {
@@ -460,3 +599,8 @@ deploying to an existing server
   After making these adjustments, the pipeline successfully executed, provisioning resources in AWS and deploying the application inside the EC2 instance.
 
   ![Diagram](./images/tf-project5-1.png)
+
+
+
+
+
